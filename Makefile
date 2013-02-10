@@ -7,7 +7,7 @@ LINK = -framework Cocoa -framework SDL -L/Users/plams/usr/lib -lfftw3f
 O=.o
 OWNOBJS = main.o nanotime.o
 ALLOBJS = $(OWNOBJS) SDLMain.o
-DEPS = cmplx.h nanotime.h
+DEPS = nanotime.h
 
 
 all: main

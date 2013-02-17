@@ -1,9 +1,9 @@
 # Makefile
 
 CC = clang++
-CCFLAGS = -m64 -O3 -Wall -I/Library/Frameworks/SDL.framework/Headers -I/Users/plams/usr/include
-#LINK = -framework Cocoa -framework SDL -L/Users/plams/usr/lib -lfftw3f
-LINK = -framework Cocoa -framework SDL -L/Users/plams/usr/lib -lfftw3f
+CCFLAGS = -m64 -O3 -Wall -I/Library/Frameworks/SDL.framework/Headers -I${HOME}/usr/include
+#LINK = -framework Cocoa -framework SDL -L${HOME}/usr/lib -lfftw3f
+LINK = -framework Cocoa -framework SDL -L${HOME}/usr/lib -lfftw3f
 O=.o
 OWNOBJS = main.o nanotime.o
 ALLOBJS = $(OWNOBJS) SDLMain.o

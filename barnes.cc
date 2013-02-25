@@ -274,10 +274,9 @@ struct barnes_hut {
 			if(e.level <= 1 || (e.width_sqr / dsqr) < threshold_sqr) {
 				// below threshold; add acceleration and
 				// recurse no further
-				float a = n.zm / dsqr;
-				float d = sqrtf(dsqr);
-				ax += (dx/d)*a;
-				ay += (dy/d)*a;
+				float s = (n.zm/dsqr)/sqrtf(dsqr);
+				ax += dx*s;
+				ay += dy*s;
 			} else {
 				// above threshold; recurse deeper..
 				// XXX stop recursion here!

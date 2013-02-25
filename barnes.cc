@@ -9,7 +9,6 @@
 #include <unistd.h>
 
 #include "nanotime.h"
-#include "log.h"
 
 #define X (10)
 #define S (1<<X)

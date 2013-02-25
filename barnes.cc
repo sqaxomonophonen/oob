@@ -295,9 +295,10 @@ struct barnes_hut {
 		int ptr = 0;
 		float sax = 0;
 		float say = 0;
-		for(int y = 0; y < S; y++) {
-			for(int x = 0; x < S; x++) {
-				float m = init[ptr++];
+		const int SKIP = 4;
+		for(int y = 0; y < S; y+=SKIP) {
+			for(int x = 0; x < S; x+=SKIP) {
+				float m = init[ptr+=SKIP];
 				if(m > 0.0f) {
 					float ax, ay;
 					cell_grav(x, y, ax, ay);
@@ -305,6 +306,7 @@ struct barnes_hut {
 					say += ay;
 				}
 			}
+			ptr+=S*(SKIP-1);
 		}
 		printf("acc sum: (%f,%f)\n", sax, say);
 	}

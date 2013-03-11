@@ -22,9 +22,12 @@ main: $(ALLOBJS) Makefile
 	$(CC) $(CCFLAGS) -o main \
 		$(ALLOBJS) \
 		$(LINK)
-	
+
 barnes: barnes.o nanotime.o Makefile
 	$(CC) $(CCFLAGS) -o barnes barnes.o nanotime.o $(LINK)
+
+dehnen: dehnen.o nanotime.o Makefile
+	$(CC) $(CCFLAGS) -o dehnen dehnen.o nanotime.o $(LINK)
 
 clean:
 	rm -f $(OWNOBJS) main

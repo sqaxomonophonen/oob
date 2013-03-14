@@ -25,6 +25,9 @@
 #define DS (1<<(DX))
 #define DN (1<<(DX+DX))
 
+template <typename N>
+N max(N a, N b) { return a > b ? a : b; }
+
 ssize_t readn(int fd, void *vptr, size_t n) {
 	size_t  nleft;
 	ssize_t nread;
@@ -125,6 +128,16 @@ struct vec2 {
 
 	struct vec2 operator-(const struct vec2& other) const {
 		return vec2(x - other.x, y - other.y);
+	}
+
+	float square_distance(struct vec2& other) const {
+		float dx = x - other.x;
+		float dy = y - other.y;
+		return dx*dx + dy*dy;
+	}
+
+	float distance(struct vec2& other) const {
+		return sqrtf(square_distance(other));
 	}
 };
 
@@ -398,44 +411,45 @@ struct tree {
 		}
 	}
 
-	void zz_rec(int i, float x0, float y0, float s) {
+	float zz_rec(int i, float x0, float y0, float s, struct vec2& pz) {
 		struct cell& c = *cells[i];
-		if(c.m0 == 0) return;
-		//printf("%f %f %f\n", c.m0, c.z.x, c.z.y);
+		if(c.m0 == 0) return 0;
 		c.normalize_z();
 		float h = s*0.5f;
 		float x0h = x0 + h;
 		float y0h = y0 + h;
-		float dx;
-		float dy;
+		float rimax = 0;
+		if(s >= LS) {
+			if(c.r[0]) rimax = max<float>(rimax, zz_rec(c.r[0], x0, y0, h, c.z));
+			if(c.r[1]) rimax = max<float>(rimax, zz_rec(c.r[1], x0h, y0, h, c.z));
+			if(c.r[2]) rimax = max<float>(rimax, zz_rec(c.r[2], x0, y0h, h, c.z));
+			if(c.r[3]) rimax = max<float>(rimax, zz_rec(c.r[3], x0h, y0h, h, c.z));
+		}
+
+		struct vec2 d;
 		if(c.z.x <= (x0h)) {
 			if(c.z.y <= (y0h)) {
-				dx = c.z.x - (x0+s);
-				dy = c.z.y - (y0+s);
+				d = vec2(x0+s, y0+s);
 			} else {
-				dx = c.z.x - (x0+s);
-				dy = c.z.y - y0;
+				d = vec2(x0+s, y0);
 			}
 		} else {
 			if(c.z.y <= (y0h)) {
-				dx = c.z.x - x0;
-				dy = c.z.y - (y0+s);
+				d = vec2(x0, y0+s);
 			} else {
-				dx = c.z.x - x0;
-				dy = c.z.y - y0;
+				d = vec2(x0, y0+s);
 			}
 		}
-		c.rmax = sqrtf(dx*dx+dy*dy);
-		if(s >= LS) {
-			if(c.r[0]) zz_rec(c.r[0], x0, y0, h);
-			if(c.r[1]) zz_rec(c.r[1], x0h, y0, h);
-			if(c.r[2]) zz_rec(c.r[2], x0, y0h, h);
-			if(c.r[3]) zz_rec(c.r[3], x0h, y0h, h);
-		}
+
+		c.rmax = d.distance(c.z);
+		if(rimax > 0 && rimax < c.rmax) c.rmax = rimax;
+		float dz = c.z.distance(pz);
+		return c.rmax + dz;
 	}
 
 	void zz() {
-		zz_rec(0, 0, 0, TS);
+		struct vec2 pz;
+		zz_rec(0, 0, 0, TS, pz);
 	}
 
 	void pass02(int x, int y, struct leaf& leaf) {

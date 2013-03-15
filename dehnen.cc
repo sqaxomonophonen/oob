@@ -239,10 +239,11 @@ struct cell {
 		m2[2] += im0 * dx * dy;
 	}
 
-	void pass01(float zx, float zy, float m) {
+	void pass01(float zx, float zy, float m, int nn) {
 		m0 += m;
 		z.x += zx;
 		z.y += zy;
+		n += nn;
 	}
 
 	void pass02(float x0, float y0, struct leaf& leaf) {
@@ -379,13 +380,13 @@ struct tree {
 		}
 	}
 
-	void pass01(int x, int y, float zm, float zx, float zy, struct leaf& leaf) {
+	void pass01(int x, int y, float zm, float zx, float zy, struct leaf& leaf, int n) {
 		unsigned int cursor = 0;
 		int mask = (1<<(DX-1))-1;
 		for(int i = (DX-1); i >= 0; i--) {
 			//printf("i:%d x:%d y:%d mask:%d\n",i,x,y,mask);
 			struct cell& c = *cells[cursor];
-			c.pass01(zx, zy, zm);
+			c.pass01(zx, zy, zm, n);
 			int q = ((x>>i)?1:0)+((y>>i)?2:0);
 			int r = c.r[q];
 			if(i >= 0) {
@@ -484,18 +485,22 @@ struct tree {
 					float zm = 0;
 					float zx = 0;
 					float zy = 0;
+					int n = 0;
 					for(float ly = 0; ly < LS; ly+=1) {
 						for(float lx = 0; lx < LS; lx+=1) {
 							float m = init[pp++];
-							leaf.masses[lp++].m0 = m;
-							zm += m;
-							zx += m * (x0 + lx);
-							zy += m * (y0 + ly);
+							if(m > 0) {
+								leaf.masses[lp++].m0 = m;
+								zm += m;
+								zx += m * (x0 + lx);
+								zy += m * (y0 + ly);
+								n++;
+							}
 						}
 						pp += TS-LS;
 					}
-					if(zm > 0) {
-						pass01(x, y, zm, zx, zy, leaf);
+					if(n > 0) {
+						pass01(x, y, zm, zx, zy, leaf, n);
 					}
 					p += LS;
 				}
@@ -535,22 +540,67 @@ struct tree {
 		}
 	}
 
-	void interact_rec(int a_index, int a_x0, int a_y0, int a_level, int b_index, int b_x0, int b_y0, int b_level) {
-		struct cell& a = *cells[a_index];
-		struct cell& b = *cells[b_index];
-		if(a.m0 == 0) return;
-		if(b.m0 == 0) return;
-		//struct vec2 r = b.z - a.z;
-		//float rsqr = r.lensqr();
+	int XXX_well_separated;
 
+	void interact_rec(int a_index, float a_x0, float a_y0, float a_size, int b_index, float b_x0, float b_y0, float b_size) {
+		if(a_size >= LS && b_size >= LS) {
+			const int Ncs = 64;
+			const int Nccpost = 16;
+			const float threshold = 1.0f / 0.65f;
 
-		//unsigned long n1n2 = ((unsigned long) a.n) * ((unsigned long) b.n);
-		//printf("%lu %d %d\n", n1n2, a.n, b.n);
+			struct cell& a = *cells[a_index];
+			struct cell& b = *cells[b_index];
+			if(a.m0 == 0) return;
+			if(b.m0 == 0) return;
+
+			if(a_index == b_index) {
+				if(a.n < Ncs) {
+					// direct summation
+					printf("TODO direct summation %d (n=%d)\n", a_index, a.n);
+				} else {
+					// split
+					float h = a_size * 0.5f;
+					if(a.r[0] && a.r[1]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[1], a_x0+h, a_y0, h);
+					if(a.r[2] && a.r[3]) interact_rec(a.r[2], a_x0, a_y0+h, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[0] && a.r[2]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[2], a_x0, a_y0+h, h);
+					if(a.r[1] && a.r[3]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[0] && a.r[3]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[1] && a.r[2]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[2], a_x0, a_y0, h);
+				}
+			} else if(a.z.distance(b.z) > ((a.rmax + b.rmax) * threshold)) {
+				// well separated; perform 
+				//printf("TODO well separated %d vs %d\n", a_index, b_index);
+				XXX_well_separated++;
+			} else if(((long)a.n*(long)b.n) < Nccpost) {
+				// direct summation
+				printf("TODO direct summation %d vs %d\n", a_index, b_index);
+			} else if(a.rmax > b.rmax) {
+				// split a
+				float h = a_size * 0.5f;
+				if(a.r[0]) interact_rec(a.r[0], a_x0, a_y0, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[1]) interact_rec(a.r[1], a_x0+h, a_y0, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[2]) interact_rec(a.r[2], a_x0, a_y0+h, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[3]) interact_rec(a.r[3], a_x0+h, a_y0+h, h, b_index, b_x0, b_y0, b_size);
+			} else {
+				// split b
+				float h = b_size * 0.5f;
+				if(b.r[0]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[0], b_x0, b_y0, h);
+				if(b.r[1]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[1], b_x0+h, b_y0, h);
+				if(b.r[2]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[2], b_x0, b_y0+h, h);
+				if(b.r[3]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[3], b_x0+h, b_y0+h, h);
+			}
+		} else {
+			printf("TODO bottom %d %d\n", a_index, b_index);
+		}
 	}
 
 	void interact() {
-		scope_timer t0("interact");
-		interact_rec(0,0,0,TX,0,0,0,TX);
+		XXX_well_separated = 0;
+		{
+			scope_timer t0("interact");
+			interact_rec(0,0,0,TS,0,0,0,TS);
+		}
+		printf("well separated cell interactions: %d\n", XXX_well_separated);
 	}
 
 	void evaluate() {
@@ -576,11 +626,10 @@ int main(int argc, char** argv) {
 	{
 		scope_timer t0("warm up");
 		t.build2(init);
-		t.interact();
 	}
 	printf("\n\n-------------------\n");
 	{
-		scope_timer t0("build");
+		scope_timer t0("proper");
 		t.build2(init);
 		t.interact();
 		t.evaluate();

@@ -545,16 +545,18 @@ struct tree {
 	void interact_rec(int a_index, float a_x0, float a_y0, float a_size, int b_index, float b_x0, float b_y0, float b_size) {
 		if(a_size >= LS && b_size >= LS) {
 			const int Ncs = 64;
-			const int Nccpost = 16;
+			const long Ncc_post = 16;
 			const float threshold = 1.0f / 0.65f;
 
 			struct cell& a = *cells[a_index];
 			struct cell& b = *cells[b_index];
-			if(a.m0 == 0) return;
-			if(b.m0 == 0) return;
+
+			// bail if either cell is completely empty
+			if(a.n == 0) return;
+			if(b.n == 0) return;
 
 			if(a_index == b_index) {
-				if(a.n < Ncs) {
+				if(a.n <= Ncs) {
 					// direct summation
 					printf("TODO direct summation %d (n=%d)\n", a_index, a.n);
 				} else {
@@ -576,7 +578,7 @@ struct tree {
 				// well separated; perform 
 				//printf("TODO well separated %d vs %d\n", a_index, b_index);
 				XXX_well_separated++;
-			} else if(((long)a.n*(long)b.n) < Nccpost) {
+			} else if((((long)a.n)*((long)b.n)) < Ncc_post) {
 				// direct summation
 				printf("TODO direct summation %d vs %d\n", a_index, b_index);
 			} else if(a.rmax > b.rmax) {

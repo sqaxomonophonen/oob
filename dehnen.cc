@@ -215,28 +215,10 @@ struct cell {
 		ti = -1; // XXX or 0? to have bzero support?
 	}
 
-	/* updates total mass, updates partial center of mass */
-	void pass1(float x, float y, float m) {
-		n++;
-		m0 += m;
-		z.x += x * m;
-		z.y += y * m;
-	}
-
 	/* calculates real center of mass */
 	void normalize_z() {
 		z.x /= m0;
 		z.y /= m0;
-	}
-
-	/* updates specific quadrupole moment */
-	void pass2(float x, float y, float m) {
-		float dx = x - z.x;
-		float dy = y - z.y;
-		float im0 = m / m0;
-		m2[0] += im0 * dx * dx;
-		m2[1] += im0 * dy * dy;
-		m2[2] += im0 * dx * dy;
 	}
 
 	void pass01(float zx, float zy, float m, int nn) {
@@ -285,101 +267,6 @@ struct tree {
 		tcs.reset();
 	}
 
-	void pass1(int x, int y, float m) {
-		unsigned int cursor = 0;
-		float fx = x;
-		float fy = y;
-		int mask = (1<<(TX-1))-1;
-		for(int i = (TX-1); i >= (LX-1); i--) {
-			struct cell& c = *cells[cursor];
-			c.pass1(fx, fy, m);
-			int q = ((x>>i)?1:0)+((y>>i)?2:0);
-			int r = c.r[q];
-			if(i > (LX-1)) {
-				if(r == 0) {
-					// empty; make new cell
-					cells.write(&empty_cell);
-					int new_cursor = cells.last();
-					cells[cursor]->r[q] = new_cursor;
-					cursor = new_cursor;
-				} else {
-					// already a cell; enter
-					cursor = r;
-				}
-			} else {
-				if(r == 0) {
-					leafs.write(&empty_leaf);
-					r = cells[cursor]->r[q] = leafs.last();
-				}
-				struct leaf& leaf = *leafs[r];
-				unsigned int mi = x + y * LS;
-				leaf.masses[mi].m0 += m;
-				return;
-			}
-			x &= mask;
-			y &= mask;
-			mask >>= 1;
-		}
-	}
-
-	void pass2(int x, int y, float m) {
-		unsigned int cursor = 0;
-		float fx = x;
-		float fy = y;
-		int mask = (1<<(TX-1))-1;
-		for(int i = (TX-1); i >= (LX-1); i--) {
-			struct cell& c = *cells[cursor];
-			c.pass2(fx, fy, m);
-			int q = ((x>>i)?1:0)+((y>>i)?2:0);
-			cursor = c.r[q];
-			x &= mask;
-			y &= mask;
-			mask >>= 1;
-		}
-	}
-
-	void normalize_z() {
-		for(int i = 0; i < cells.size; i++) {
-			struct cell& c = *cells[i];
-			c.normalize_z();
-		}
-	}
-
-	void build(float* init) {
-		reset();
-		int nmass = 0;
-		{
-			scope_timer t0("pass1");
-			int ptr = 0;
-			for(int y = 0; y < TS; y++) {
-				for(int x = 0; x < TS; x++) {
-					float m = init[ptr++];
-					if(m > 0.0f) {
-						pass1(x, y, m);
-						nmass++;
-					}
-				}
-			}
-		}
-		printf("number of cells: %d / number of non-zero masses: %d\n", cells.last(), nmass);
-		{
-			scope_timer t0("normalize z");
-			normalize_z();
-		}
-		{
-			scope_timer t0("pass2");
-			int ptr = 0;
-			for(int y = 0; y < TS; y++) {
-				for(int x = 0; x < TS; x++) {
-					float m = init[ptr++];
-					if(m > 0.0f) {
-						pass2(x, y, m);
-					}
-				}
-			}
-		}
-	}
-
 	void pass01(int x, int y, float zm, float zx, float zy, struct leaf& leaf, int n) {
 		unsigned int cursor = 0;
 		int mask = (1<<(DX-1))-1;
@@ -388,9 +275,8 @@ struct tree {
 			struct cell& c = *cells[cursor];
 			c.pass01(zx, zy, zm, n);
 			int q = ((x>>i)?1:0)+((y>>i)?2:0);
-			int r = c.r[q];
-			if(i >= 0) {
-				if(r == 0) {
+			if(i > 0) {
+				if(c.r[q] == 0) {
 					// empty; make new cell
 					cells.write(&empty_cell);
 					int new_cursor = cells.last();
@@ -398,7 +284,7 @@ struct tree {
 					cursor = new_cursor;
 				} else {
 					// already a cell; enter
-					cursor = r;
+					cursor = c.r[q];
 				}
 			} else {
 				leafs.write(&leaf);
@@ -420,7 +306,7 @@ struct tree {
 		float x0h = x0 + h;
 		float y0h = y0 + h;
 		float rimax = 0;
-		if(s >= LS) {
+		if(h > LS) {
 			if(c.r[0]) rimax = max<float>(rimax, zz_rec(c.r[0], x0, y0, h, c.z));
 			if(c.r[1]) rimax = max<float>(rimax, zz_rec(c.r[1], x0h, y0, h, c.z));
 			if(c.r[2]) rimax = max<float>(rimax, zz_rec(c.r[2], x0, y0h, h, c.z));
@@ -444,6 +330,7 @@ struct tree {
 
 		c.rmax = d.distance(c.z);
 		if(rimax > 0 && rimax < c.rmax) c.rmax = rimax;
+		//printf("s:%f rmax:%f\n", s, c.rmax);
 		float dz = c.z.distance(pz);
 		return c.rmax + dz;
 	}
@@ -507,7 +394,11 @@ struct tree {
 				p += (LS-1) * TS;
 			}
 		}
+
+		printf("number of masses: %d\n", cells[0]->n);
 		printf("number of cells: %d\n", cells.last());
+		printf("number of leafs: %d\n", leafs.last());
+
 		{
 			scope_timer t0("zz");
 			zz();
@@ -541,9 +432,174 @@ struct tree {
 	}
 
 	int XXX_well_separated;
+	int XXX_direct_ll;
+	int XXX_direct_ll_n;
 
-	void interact_rec(int a_index, float a_x0, float a_y0, float a_size, int b_index, float b_x0, float b_y0, float b_size) {
-		if(a_size >= LS && b_size >= LS) {
+	void direct_ll(int a_index, float a_x0, float a_y0, int b_index, float b_x0, float b_y0) {
+		XXX_direct_ll++;
+		float dx = a_x0 - b_x0;
+		float dy = a_y0 - b_y0;
+		float d = sqrtf(dx*dx + dy*dy);
+
+		if(a_index < 0 || a_index > leafs.last()) {
+			printf("leaf index a %d out of bounds (last: %d)!\n", a_index, leafs.last());
+			exit(1);
+		}
+		if(b_index < 0 || b_index > leafs.last()) {
+			printf("leaf index b %d out of bounds (last: %d)!\n", b_index, leafs.last());
+			exit(1);
+		}
+		struct leaf& a = *leafs[a_index];
+		struct leaf& b = *leafs[b_index];
+
+		int ai = 0;
+		for(float ady = 0; ady < LS; ady+=1) {
+			for(float adx = 0; adx < LS; adx+=1) {
+				struct mass& mass_a = a.masses[ai];
+				if(mass_a.m0 > 0) {
+					int bi = 0;
+					for(float bdy = 0; bdy < LS; bdy+=1) {
+						for(float bdx = 0; bdx < LS; bdx+=1) {
+							struct mass& mass_b = b.masses[bi];
+							if(mass_b.m0 > 0) {
+								XXX_direct_ll_n++;
+								float ax = a_x0 + adx;
+								float ay = a_y0 + ady;
+								float bx = b_x0 + bdx;
+								float by = b_y0 + bdy;
+								float rx = bx - ax;
+								float ry = by - ay;
+								float r2 = rx*rx + ry*ry;
+								float r = sqrtf(r2);
+								float d0 = 1/r;
+								float d1 = -1/(r2*r);
+								float d2 = 2/(r2*r2*r);
+								float d3 = -4/(r2*r2*r2*r);
+							}
+							bi++;
+						}
+					}
+				}
+				ai++;
+			}
+		}
+	}
+
+	void direct_cl(int cell_index, float cell_x0, float cell_y0, float cell_size, int leaf_index, float leaf_x0, float leaf_y0) {
+		struct cell& cell = *cells[cell_index];
+		float h = cell_size * 0.5f;
+		if(h > LS) {
+			if(cell.r[0]) direct_cl(cell.r[0], cell_x0, cell_y0, h, leaf_index, leaf_x0, leaf_y0);
+			if(cell.r[1]) direct_cl(cell.r[1], cell_x0+h, cell_y0, h, leaf_index, leaf_x0, leaf_y0);
+			if(cell.r[2]) direct_cl(cell.r[2], cell_x0, cell_y0+h, h, leaf_index, leaf_x0, leaf_y0);
+			if(cell.r[3]) direct_cl(cell.r[3], cell_x0+h, cell_y0+h, h, leaf_index, leaf_x0, leaf_y0);
+		} else {
+			if(cell.r[0]) direct_ll(cell.r[0], cell_x0, cell_y0, leaf_index, leaf_x0, leaf_y0);
+			if(cell.r[1]) direct_ll(cell.r[1], cell_x0+h, cell_y0, leaf_index, leaf_x0, leaf_y0);
+			if(cell.r[2]) direct_ll(cell.r[2], cell_x0, cell_y0+h, leaf_index, leaf_x0, leaf_y0);
+			if(cell.r[3]) direct_ll(cell.r[3], cell_x0+h, cell_y0+h, leaf_index, leaf_x0, leaf_y0);
+		}
+	}
+
+	void direct_c2(int index, float x0, float y0, float size) {
+		struct cell& cell = *cells[index];
+		float h = size*0.5f;
+		if(h > LS) {
+			if(cell.r[0]) direct_c2(cell.r[0], x0, y0, h);
+			if(cell.r[1]) direct_c2(cell.r[1], x0+h, y0, h);
+			if(cell.r[2]) direct_c2(cell.r[2], x0, y0+h, h);
+			if(cell.r[3]) direct_c2(cell.r[3], x0+h, y0+h, h);
+			if(cell.r[0] && cell.r[1]) direct_cc(cell.r[0], x0, y0, h, cell.r[1], x0+h, y0, h);
+			if(cell.r[2] && cell.r[3]) direct_cc(cell.r[2], x0, y0+h, h, cell.r[3], x0+h, y0+h, h);
+			if(cell.r[0] && cell.r[2]) direct_cc(cell.r[0], x0, y0, h, cell.r[2], x0, y0+h, h);
+			if(cell.r[1] && cell.r[3]) direct_cc(cell.r[1], x0+h, y0, h, cell.r[3], x0+h, y0+h, h);
+			if(cell.r[0] && cell.r[3]) direct_cc(cell.r[0], x0, y0, h, cell.r[3], x0+h, y0+h, h);
+			if(cell.r[1] && cell.r[2]) direct_cc(cell.r[1], x0+h, y0, h, cell.r[2], x0, y0+h, h);
+		} else {
+			if(cell.r[0]) direct_ll(cell.r[0], x0, y0, cell.r[0], x0, y0);
+			if(cell.r[1]) direct_ll(cell.r[1], x0+h, y0, cell.r[1], x0+h, y0);
+			if(cell.r[2]) direct_ll(cell.r[2], x0, y0+h, cell.r[2], x0, y0+h);
+			if(cell.r[3]) direct_ll(cell.r[3], x0+h, y0+h, cell.r[3], x0+h, y0+h);
+			if(cell.r[0] && cell.r[1]) direct_ll(cell.r[0], x0, y0, cell.r[1], x0+h, y0);
+			if(cell.r[2] && cell.r[3]) direct_ll(cell.r[2], x0, y0+h, cell.r[3], x0+h, y0+h);
+			if(cell.r[0] && cell.r[2]) direct_ll(cell.r[0], x0, y0, cell.r[2], x0, y0+h);
+			if(cell.r[1] && cell.r[3]) direct_ll(cell.r[1], x0+h, y0, cell.r[3], x0+h, y0+h);
+			if(cell.r[0] && cell.r[3]) direct_ll(cell.r[0], x0, y0, cell.r[3], x0+h, y0+h);
+			if(cell.r[1] && cell.r[2]) direct_ll(cell.r[1], x0+h, y0, cell.r[2], x0, y0+h);
+		}
+	}
+
+	void direct_cc(int a_index, float a_x0, float a_y0, float a_size, int b_index, float b_x0, float b_y0, float b_size) {
+		struct cell& a = *cells[a_index];
+		struct cell& b = *cells[b_index];
+		float ha = a_size * 0.5f;
+		float hb = b_size * 0.5f;
+
+		if(ha > LS && hb > LS) {
+			for(int qa = 0; qa < 4; qa++) {
+				for(int qb = 0; qb < 4; qb++) {
+					if(a.r[qa] && b.r[qb]) {
+						direct_cc(
+							a.r[qa],
+							a_x0 + ((qa&1)?ha:0),
+							a_y0 + ((qa&2)?ha:0),
+							ha,
+							b.r[qb],
+							b_x0 + ((qa&1)?hb:0),
+							b_y0 + ((qb&2)?hb:0),
+							hb);
+					}
+				}
+			}
+		} else if(ha > LS) {
+			for(int qa = 0; qa < 4; qa++) {
+				for(int qb = 0; qb < 4; qb++) {
+					if(a.r[qa] && b.r[qb]) {
+						direct_cl(
+							a.r[qa],
+							a_x0 + ((qa&1)?ha:0),
+							a_y0 + ((qa&2)?ha:0),
+							ha,
+							b.r[qb],
+							b_x0 + ((qa&1)?hb:0),
+							b_y0 + ((qb&2)?hb:0));
+					}
+				}
+			}
+		} else if(hb > LS) {
+			for(int qa = 0; qa < 4; qa++) {
+				for(int qb = 0; qb < 4; qb++) {
+					if(a.r[qa] && b.r[qb]) {
+						direct_cl(
+							b.r[qb],
+							b_x0 + ((qa&1)?hb:0),
+							b_y0 + ((qb&2)?hb:0),
+							hb,
+							a.r[qa],
+							a_x0 + ((qa&1)?ha:0),
+							a_y0 + ((qa&2)?ha:0));
+					}
+				}
+			}
+		} else {
+			for(int qa = 0; qa < 4; qa++) {
+				for(int qb = 0; qb < 4; qb++) {
+					if(a.r[qa] && b.r[qb]) {
+						direct_ll(
+							b.r[qb],
+							b_x0 + ((qa&1)?hb:0),
+							b_y0 + ((qb&2)?hb:0),
+							a.r[qa],
+							a_x0 + ((qa&1)?ha:0),
+							a_y0 + ((qa&2)?ha:0));
+					}
+				}
+			}
+		}
+	}
+
+	void interact_cc(int a_index, float a_x0, float a_y0, float a_size, int b_index, float b_x0, float b_y0, float b_size) {
+		if(a_size > LS && b_size > LS) {
 			const int Ncs = 64;
 			const long Ncc_post = 16;
 			const float threshold = 1.0f / 0.65f;
@@ -558,56 +614,68 @@ struct tree {
 			if(a_index == b_index) {
 				if(a.n <= Ncs) {
 					// direct summation
-					printf("TODO direct summation %d (n=%d)\n", a_index, a.n);
+					//printf("TODO direct summation %d (n=%d  s=%f)\n", a_index, a.n, a_size);
+					direct_c2(a_index, a_x0, a_y0, a_size);
 				} else {
 					// split
 					float h = a_size * 0.5f;
-					if(a.r[0] && a.r[1]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[1], a_x0+h, a_y0, h);
-					if(a.r[2] && a.r[3]) interact_rec(a.r[2], a_x0, a_y0+h, h, a.r[3], a_x0+h, a_y0+h, h);
-					if(a.r[0] && a.r[2]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[2], a_x0, a_y0+h, h);
-					if(a.r[1] && a.r[3]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
-					if(a.r[0] && a.r[3]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
-					if(a.r[1] && a.r[2]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[2], a_x0, a_y0+h, h);
 
-					if(a.r[0]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[0], a_x0, a_y0, h);
-					if(a.r[1]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[1], a_x0+h, a_y0, h);
-					if(a.r[2]) interact_rec(a.r[2], a_x0, a_y0+h, h, a.r[2], a_x0, a_y0+h, h);
-					if(a.r[3]) interact_rec(a.r[3], a_x0+h, a_y0+h, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[0]) interact_cc(a.r[0], a_x0, a_y0, h, a.r[0], a_x0, a_y0, h);
+					if(a.r[1]) interact_cc(a.r[1], a_x0+h, a_y0, h, a.r[1], a_x0+h, a_y0, h);
+					if(a.r[2]) interact_cc(a.r[2], a_x0, a_y0+h, h, a.r[2], a_x0, a_y0+h, h);
+					if(a.r[3]) interact_cc(a.r[3], a_x0+h, a_y0+h, h, a.r[3], a_x0+h, a_y0+h, h);
+
+					if(a.r[0] && a.r[1]) interact_cc(a.r[0], a_x0, a_y0, h, a.r[1], a_x0+h, a_y0, h);
+					if(a.r[2] && a.r[3]) interact_cc(a.r[2], a_x0, a_y0+h, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[0] && a.r[2]) interact_cc(a.r[0], a_x0, a_y0, h, a.r[2], a_x0, a_y0+h, h);
+					if(a.r[1] && a.r[3]) interact_cc(a.r[1], a_x0+h, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[0] && a.r[3]) interact_cc(a.r[0], a_x0, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
+					if(a.r[1] && a.r[2]) interact_cc(a.r[1], a_x0+h, a_y0, h, a.r[2], a_x0, a_y0+h, h);
 				}
 			} else if(a.z.distance(b.z) > ((a.rmax + b.rmax) * threshold)) {
-				// well separated; perform 
+				// well separated
 				//printf("TODO well separated %d vs %d\n", a_index, b_index);
 				XXX_well_separated++;
 			} else if((((long)a.n)*((long)b.n)) < Ncc_post) {
 				// direct summation
-				printf("TODO direct summation %d vs %d\n", a_index, b_index);
+				//printf("TODO direct summation %d (n:%d) vs %d (n:%d)\n", a_index, a.n, b_index, b.n);
+				direct_cc(a_index, a_x0, a_y0, a_size, b_index, b_x0, b_y0, b_size);
 			} else if(a.rmax > b.rmax) {
 				// split a
 				float h = a_size * 0.5f;
-				if(a.r[0]) interact_rec(a.r[0], a_x0, a_y0, h, b_index, b_x0, b_y0, b_size);
-				if(a.r[1]) interact_rec(a.r[1], a_x0+h, a_y0, h, b_index, b_x0, b_y0, b_size);
-				if(a.r[2]) interact_rec(a.r[2], a_x0, a_y0+h, h, b_index, b_x0, b_y0, b_size);
-				if(a.r[3]) interact_rec(a.r[3], a_x0+h, a_y0+h, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[0]) interact_cc(a.r[0], a_x0, a_y0, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[1]) interact_cc(a.r[1], a_x0+h, a_y0, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[2]) interact_cc(a.r[2], a_x0, a_y0+h, h, b_index, b_x0, b_y0, b_size);
+				if(a.r[3]) interact_cc(a.r[3], a_x0+h, a_y0+h, h, b_index, b_x0, b_y0, b_size);
 			} else {
 				// split b
 				float h = b_size * 0.5f;
-				if(b.r[0]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[0], b_x0, b_y0, h);
-				if(b.r[1]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[1], b_x0+h, b_y0, h);
-				if(b.r[2]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[2], b_x0, b_y0+h, h);
-				if(b.r[3]) interact_rec(a_index, a_x0, a_y0, a_size, b.r[3], b_x0+h, b_y0+h, h);
+				if(b.r[0]) interact_cc(a_index, a_x0, a_y0, a_size, b.r[0], b_x0, b_y0, h);
+				if(b.r[1]) interact_cc(a_index, a_x0, a_y0, a_size, b.r[1], b_x0+h, b_y0, h);
+				if(b.r[2]) interact_cc(a_index, a_x0, a_y0, a_size, b.r[2], b_x0, b_y0+h, h);
+				if(b.r[3]) interact_cc(a_index, a_x0, a_y0, a_size, b.r[3], b_x0+h, b_y0+h, h);
 			}
+		} else if(a_size > LS) {
+			direct_cl(a_index, a_x0, a_y0, a_size, b_index, b_x0, b_y0);
+		} else if(b_size > LS) {
+			direct_cl(b_index, b_x0, b_y0, b_size, a_index, a_x0, a_y0);
 		} else {
-			printf("TODO bottom %d %d\n", a_index, b_index);
+			direct_ll(a_index, a_x0, a_y0, b_index, b_x0, b_y0);
+			//printf("TODO bottom %d (size:%f) %d (size:%f)\n", a_index, a_size, b_index, b_size);
 		}
 	}
 
 	void interact() {
 		XXX_well_separated = 0;
+		XXX_direct_ll = 0;
+		XXX_direct_ll_n = 0;
 		{
 			scope_timer t0("interact");
-			interact_rec(0,0,0,TS,0,0,0,TS);
+			interact_cc(0,0,0,TS,0,0,0,TS);
 		}
 		printf("well separated cell interactions: %d\n", XXX_well_separated);
+		printf("direct leaf-leaf interactions: %d\n", XXX_direct_ll);
+		printf("direct mass-mass interactions: %d\n",  XXX_direct_ll_n);
 	}
 
 	void evaluate() {

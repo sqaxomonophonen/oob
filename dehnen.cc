@@ -565,7 +565,12 @@ struct tree {
 					if(a.r[0] && a.r[2]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[2], a_x0, a_y0+h, h);
 					if(a.r[1] && a.r[3]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
 					if(a.r[0] && a.r[3]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[3], a_x0+h, a_y0+h, h);
-					if(a.r[1] && a.r[2]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[2], a_x0, a_y0, h);
+					if(a.r[1] && a.r[2]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[2], a_x0, a_y0+h, h);
+
+					if(a.r[0]) interact_rec(a.r[0], a_x0, a_y0, h, a.r[0], a_x0, a_y0, h);
+					if(a.r[1]) interact_rec(a.r[1], a_x0+h, a_y0, h, a.r[1], a_x0+h, a_y0, h);
+					if(a.r[2]) interact_rec(a.r[2], a_x0, a_y0+h, h, a.r[2], a_x0, a_y0+h, h);
+					if(a.r[3]) interact_rec(a.r[3], a_x0+h, a_y0+h, h, a.r[3], a_x0+h, a_y0+h, h);
 				}
 			} else if(a.z.distance(b.z) > ((a.rmax + b.rmax) * threshold)) {
 				// well separated; perform 

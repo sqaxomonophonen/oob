@@ -29,6 +29,9 @@ barnes: barnes.o nanotime.o Makefile
 dehnen: dehnen.o nanotime.o Makefile
 	$(CC) $(CCFLAGS) -o dehnen dehnen.o nanotime.o $(LINK)
 
+conv: conv.o nanotime.o Makefile
+	$(CC) $(CCFLAGS) -o conv conv.o nanotime.o $(LINK)
+
 clean:
 	rm -f $(OWNOBJS) main
 

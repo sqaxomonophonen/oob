@@ -24,6 +24,10 @@
 #define DS (1<<(DX))
 #define DN (1<<(DX*2))
 
+#define ZX (LX+3)
+#define ZS (1<<(ZX))
+#define ZN (1<<(ZX*2))
+
 ssize_t readn(int fd, void *vptr, size_t n) {
 	size_t  nleft;
 	ssize_t nread;
@@ -113,6 +117,21 @@ struct lst {
 	}
 };
 
+struct leaf {
+	fftwf_complex masses[LN];
+	float mass, zmx, zmy;
+
+	void clear() {
+		bzero(masses, LN * sizeof(fftwf_complex));
+		mass = zmx = zmy = 0.0f;
+	}
+
+	void normalize() {
+		zmx /= mass;
+		zmy /= mass;
+	}
+};
+
 struct node {
 	unsigned int r[4]; // children
 	float mass, zmx, zmy;
@@ -121,38 +140,90 @@ struct node {
 	void clear() {
 		r[0] = r[1] = r[2] = r[3] = 0;
 		mass = zmx = zmy = 0.0f;
+		zn = 0;
 	}
-	
-	void update(float _mass, float _zmx, float _zmy, int _zn) {
-		mass += _mass;
-		zmx += _zmx;
-		zmy += _zmy;
+
+	void update(struct leaf& leaf, int _zn) {
+		mass += leaf.mass;
+		zmx += leaf.zmx;
+		zmy += leaf.zmy;
 		zn += _zn;
 	}
 
 	void normalize() {
-		if(zn > 0) {
+		if(!is_empty()) {
 			zmx /= mass;
 			zmy /= mass;
 		}
 	}
+
+	bool is_empty() const {
+		return zn == 0;
+	}
 };
 
-struct leaf {
-	fftwf_complex masses[LN];
-	int n;
+struct gravity_convolution {
+	fftwf_plan data_forward_plan;
+	fftwf_plan data_backward_plan;
+	fftwf_complex *placeholder;
+	fftwf_complex *kernel;
 
-	void clear() {
-		for(int i = 0; i < LN; i++) {
-			masses[i][0] = masses[i][1] = 0.0f;
+	gravity_convolution() {
+		kernel = (fftwf_complex*) fftwf_malloc(ZN * sizeof(fftwf_complex));
+
+		const int nz = ZS>>1;
+		const int mid = nz>>1;
+
+		fftwf_plan kernel_plan = fftwf_plan_dft_2d(ZS, ZS, kernel, kernel, -1, 0);
+		for(int y = 0; y < ZS; y++) {
+			for(int x = 0; x < ZS; x++) {
+				if(x < nz && y < nz && !(x == mid && y == mid)) {
+					float dx = mid - x;
+					float dy = mid - y;
+					float d2 = dx*dx + dy*dy;
+					float di = 1.0f / sqrtf(d2);
+					kernel_at(x, y)[0] = (dx * di) / d2;
+					kernel_at(x, y)[1] = (dy * di) / d2;
+				} else {
+					// zero padding
+					kernel_at(x, y)[0] = 0.0f;
+					kernel_at(x, y)[1] = 0.0f;
+				}
+			}
 		}
-		n = 0;
+		fftwf_execute(kernel_plan);
+
+		placeholder = (fftwf_complex*) fftwf_malloc(ZN * sizeof(fftwf_complex));
+		data_forward_plan = fftwf_plan_dft_2d(ZS, ZS, placeholder, placeholder, -1, 0);
+		data_backward_plan = fftwf_plan_dft_2d(ZS, ZS, placeholder, placeholder, 1, 0);
+	}
+
+	~gravity_convolution() {
+		fftwf_free(placeholder);
+		fftwf_free(kernel);
+	}
+
+	fftwf_complex& kernel_at(int x, int y) const {
+		return kernel[x + (y << ZX)];
+	}
+
+	void convolve(fftwf_complex* z) {
+		fftwf_execute_dft(data_forward_plan, z, z);
+		for(int i = 0; i < ZN; i++) {
+			float new_re = z[i][0] * kernel[i][0] - z[i][1] * kernel[i][1];
+			z[i][1] = z[i][1] * kernel[i][0] + z[i][0] * kernel[i][1];
+			z[i][0] = new_re;
+		}
+		fftwf_execute_dft(data_backward_plan, z, z);
 	}
 };
 
 struct tree {
+	struct gravity_convolution gc;
+
 	struct lst<struct node> nodes;
 	struct lst<struct leaf> leafs;
+	struct lst<fftwf_complex*> zs;
 
 	struct node empty_node;
 	struct leaf empty_leaf;
@@ -169,12 +240,12 @@ struct tree {
 		leafs.write(&empty_leaf);
 	}
 
-	void add_leaf(int x, int y, float mass, float zmx, float zmy, int zn, struct leaf& leaf) {
+	void add_leaf(int x, int y, int zn, struct leaf& leaf) {
 		unsigned int cursor = 0;
 		int mask = (1<<(DX-1))-1;
 		for(int i = (DX-1); i >= 0; i--) {
 			struct node& n = *nodes[cursor];
-			n.update(mass, zmx, zmy, zn);
+			n.update(leaf, zn);
 			int q = ((x>>i)?1:0)+((y>>i)?2:0);
 			if(i > 0) {
 				if(n.r[q] == 0) {
@@ -195,6 +266,29 @@ struct tree {
 			x &= mask;
 			y &= mask;
 			mask >>= 1;
+		}
+	}
+
+	void add_zleaf() {
+		while(zs.last() < (leafs.last()-1)) {
+			fftwf_complex* f = (fftwf_complex*) fftwf_malloc(ZN * sizeof(fftwf_complex));
+			zs.write(&f);
+		}
+		struct leaf& leaf = *leafs.top();
+		fftwf_complex* f = *zs.top();
+
+		bzero(f, ZN * sizeof(fftwf_complex));
+
+		int i = 0;
+		int j = 0;
+		for(int y = 0; y < LS; y++) {
+			for(int x = 0; x < LS; x++) {
+				f[j][0] = leaf.masses[i][0];
+				f[j][1] = leaf.masses[i][1];
+				i++;
+				j++;
+			}
+			j += ZS-LS;
 		}
 	}
 
@@ -228,8 +322,11 @@ struct tree {
 					}
 				}
 				if(n > 0) {
-					leaf.n = n;
-					add_leaf(x, y, mass, zmx, zmy, n, leaf);
+					leaf.mass = mass;
+					leaf.zmx = zmx;
+					leaf.zmy = zmy;
+					add_leaf(x, y, n, leaf);
+					add_zleaf();
 				}
 				p += LS;
 			}
@@ -243,6 +340,16 @@ struct tree {
 		for(int i = 0; i <= nodes.last(); i++) {
 			struct node& n = *nodes[i];
 			n.normalize();
+		}
+		for(int i = 0; i <= leafs.last(); i++) {
+			struct leaf& l = *leafs[i];
+			l.normalize();
+		}
+	}
+
+	void convolve() {
+		for(int i = 0; i <= (leafs.last()-1); i++) {
+			gc.convolve(*zs[i]);
 		}
 	}
 
@@ -266,228 +373,96 @@ struct tree {
 		return 0;
 	}
 
-	void find_neighbour_convolutions() {
-		int nc1x1 = 0;
-		int nc1x2 = 0;
-		int nc2x2 = 0;
-		int ndirect = 0;
+	void barnes_rec(float x0, float y0, int n, int d, fftwf_complex& res) {
+		const float threshold = 0.5;
+		const float threshold_sqr = threshold * threshold;
 
-		// convolution costs
-		#if LX == 3
-		const float Cc1x1 = 0.0239f;
-		const float Cc1x2 = 0.0509f;
-		const float Cc2x2 = 0.114f;
-		#elif LX == 4
-		const float Cc1x1 = 0.114f;
-		const float Cc1x2 = 0.300f;
-		const float Cc2x2 = 0.645f;
-		#elif LX == 5
-		const float Cc1x1 = 0.645f;
-		const float Cc1x2 = 1.45f;
-		const float Cc2x2 = 3.11f;
-		#else
-		#error "no convolution costs";
-		#endif
-		const float Cdirect = Cc1x1 / 2.0f; // XXX GUESS
+		struct node& node = *nodes[n];
 
-		// threshold for direct summation (chosen: N)
-		const int direct_threshold = LS * LS;
+		float dx = node.zmx - x0;
+		float dy = node.zmy - y0;
+		float dsqr = dx*dx + dy*dy;
+		float wsqr = 1<<((TX-d)*2);
 
-		float Ctotal = 0.0f;
-		float Csimple = 0.0f;
+		if(dsqr < 0.001f) return;
 
-		int neighbours[9];
-		int nscheme[5] = {0,0,0,0,0};
+		if(d == (DX-1)) {
+			for(int q = 0; q < 4; q++) {
+				int r = node.r[q];
+				if(r) {
+					struct leaf& leaf = *leafs[r];
+					float dx1 = leaf.zmx - x0;
+					float dy1 = leaf.zmy - y0;
+					float dsqr1 = dx1*dx1 + dy1*dy1;
+					if(dsqr1 >= 0.001f) {
+						float s = (leaf.mass/dsqr1)/sqrtf(dsqr1);
+						res[0] += dx1*s;
+						res[1] += dy1*s;
+					}
+				}
+			}
+		} else if((wsqr / dsqr) < threshold_sqr) {
+			float s = (node.mass/dsqr)/sqrtf(dsqr);
+			res[0] += dx*s;
+			res[1] += dy*s;
+		} else {
+			for(int q = 0; q < 4; q++) {
+				int r = node.r[q];
+				if(r) {
+					barnes_rec(x0, y0, r, d+1, res);
+				}
+			}
+		}
+	}
 
+	void barnes(float x0, float y0, fftwf_complex& res) {
+		res[0] = 0;
+		res[1] = 0;
+		barnes_rec(x0, y0, 0, 0, res);
+	}
+
+	void apply_grav() {
+		const int mid = ZS>>2;
 		for(int y = 0; y < DS; y++) {
 			for(int x = 0; x < DS; x++) {
-				int l = find_leaf(x, y);
-				if(l > 0) {
-					Csimple += Cc2x2;
-					int ni = 0;
-					int n = 0;
-					for(int dy = -1; dy <= 1; dy++) {
-						for(int dx = -1; dx <= 1; dx++) {
-							if(dx == 0 && dy == 0) { 
-								neighbours[ni] = l;
-							} else {
-								int l2 = find_leaf(x + dx, y + dy);
-								neighbours[ni] = l2;
-								if(l2) n++;
+				int l0 = find_leaf(x, y);
+				struct leaf& leaf0 = *leafs[l0];
+				if(l0) {
+					fftwf_complex init;
+					barnes(leaf0.zmx, leaf0.zmy, init);
+					{
+						int i0 = 0;
+						for(int ly = 0; ly < LS; ly++) {
+							for(int lx = 0; lx < LS; lx++) {
+								leaf0.masses[i0][0] = init[0];
+								leaf0.masses[i0][1] = init[1];
+								i0++;
 							}
-							ni++;
 						}
 					}
-					if(n == 0) {
-						// scheme 0
-						int ln = leafs[l]->n;
-						int ln2 = ln * ln;
-						if(ln2 <= direct_threshold) {
-							ndirect++;
-							Ctotal += Cdirect * (((float)ln2) / ((float)direct_threshold));
-						} else {
-							nc1x1++;
-							Ctotal += Cc1x1;
-						}
-						nscheme[0]++;
-					} else {
-						int ln = leafs[l]->n;
 
-						// evaluate scheme 1
-						int nc1x1_sc1 = 0;
-						int ndirect_sc1 = 0;
-						float C_sc1 = 0.0f;
-						int scheme = 1;
-						{
-							int ni = 0;
-							for(int dy = -1; dy <= 1; dy++) {
-								for(int dx = -1; dx <= 1; dx++) {
-									int ln2 = leafs[neighbours[ni++]]->n;
-									if(ln2 > 0) {
-										ln2 = ln * ln2;
-										if(ln2 <= direct_threshold) {
-											ndirect_sc1++;
-											C_sc1 += Cdirect * (((float)ln2) / ((float)direct_threshold));
-										} else {
-											nc1x1_sc1++;
-											C_sc1 += Cc1x1;
-										}
+					for(int dy = -1; dy <= 1; dy++) {
+						for(int dx = -1; dx <= 1; dx++) {
+							int l1 = dx == 0 && dy == 0 ? l0 : find_leaf(x+dx, y+dy);
+							if(l1) {
+								fftwf_complex* z1 = *zs[l1-1];
+								int i0 = 0;
+								int i1 = mid-dx*LS + ((mid-dy*LS)<<ZX);
+								for(int ly = 0; ly < LS; ly++) {
+									for(int lx = 0; lx < LS; lx++) {
+										leaf0.masses[i0][0] += z1[i1][0];
+										leaf0.masses[i0][1] += z1[i1][1];
+										i0++;
+										i1++;
 									}
+									i1 += ZS-LS;
 								}
 							}
-						}
-						float Cmin = C_sc1;
-
-						// evaluate scheme 2
-						int nc1x1_sc2 = 0;
-						int nc1x2_sc2 = 0;
-						int ndirect_sc2 = 0;
-						float C_sc2 = 0.0f;
-						{
-							int ni = 0;
-							for(int dy = -1; dy <= 1; dy++) {
-								float Cs = 0.0f;
-								int _n1 = 0;
-								int _nd = 0;
-								for(int dx = -1; dx <= 1; dx++) {
-									int ln2 = leafs[neighbours[ni++]]->n;
-									if(ln2 > 0) {
-										ln2 = ln * ln2;
-										if(ln2 <= direct_threshold) {
-											_nd++;
-											Cs += Cdirect * (((float)ln2) / ((float)direct_threshold));
-										} else {
-											_n1++;
-											Cs += Cc1x1;
-										}
-									}
-								}
-								if(Cs < Cc1x2) {
-									C_sc2 += Cs;
-									nc1x1_sc2 += _n1;
-									ndirect_sc2 += _nd;
-								} else {
-									C_sc2 += Cc1x2;
-									nc1x2_sc2++;
-								}
-							}
-						}
-						if(C_sc2 < Cmin) {
-							scheme = 2;
-							Cmin = C_sc2;
-						}
-
-						// evaluate scheme 3
-						int nc1x1_sc3 = 0;
-						int nc1x2_sc3 = 0;
-						int ndirect_sc3 = 0;
-						float C_sc3 = 0.0f;
-						{
-							int ni = 0;
-							for(int dx = -1; dx <= 1; dx++) {
-								float Cs = 0.0f;
-								int _n1 = 0;
-								int _nd = 0;
-								for(int dy = -1; dy <= 1; dy++) {
-									int ln2 = leafs[neighbours[ni]]->n;
-									ni += 3;
-									if(ln2 > 0) {
-										ln2 = ln * ln2;
-										if(ln2 <= direct_threshold) {
-											_nd++;
-											Cs += Cdirect * (((float)ln2) / ((float)direct_threshold));
-										} else {
-											_n1++;
-											Cs += Cc1x1;
-										}
-									}
-								}
-								ni -= 8;
-								if(Cs < Cc1x2) {
-									C_sc3 += Cs;
-									nc1x1_sc3 += _n1;
-									ndirect_sc3 += _nd;
-								} else {
-									C_sc3 += Cc1x2;
-									nc1x2_sc3++;
-								}
-							}
-						}
-						if(C_sc3 < Cmin) {
-							scheme = 3;
-							Cmin = C_sc3;
-						}
-
-						// evaluate scheme 4
-						if(Cc2x2 < Cmin) {
-							// soooo easy!
-							scheme = 4;
-							Cmin = Cc2x2;
-						}
-
-						Ctotal += Cmin;
-
-						switch(scheme) {
-							case 1:
-								nscheme[1]++;
-								ndirect += ndirect_sc1;
-								nc1x1 += nc1x1_sc1;
-								break;
-							case 2:
-								nscheme[2]++;
-								ndirect += ndirect_sc2;
-								nc1x1 += nc1x1_sc2;
-								nc1x2 += nc1x2_sc2;
-								break;
-							case 3:
-								nscheme[3]++;
-								ndirect += ndirect_sc3;
-								nc1x1 += nc1x1_sc3;
-								nc1x2 += nc1x2_sc3;
-								break;
-							case 4:
-								nscheme[4]++;
-								nc2x2++;
-								break;
-							default:
-								fprintf(stderr, "unhandled scheme %d\n", scheme);
-								exit(1);
-								break;
 						}
 					}
 				}
 			}
 		}
-
-		printf(" nc1x1: %d\n", nc1x1);
-		printf(" nc2x2: %d\n", nc2x2);
-		printf(" nc1x2: %d\n", nc1x2);
-		printf(" ndirect: %d\n", ndirect);
-		for(int i = 0; i < 5; i++) {
-			printf("  nscheme[%d]: %d\n", i, nscheme[i]);
-		}
-		printf(" Ctotal: %f\n", Ctotal);
-		printf(" Cc2x2: %f\n", Csimple);
 	}
 
 };
@@ -530,8 +505,12 @@ int main(int argc, char** argv) {
 			t.normalize();
 		}
 		{
-			scope_timer t0("find neighbour convolutions");
-			t.find_neighbour_convolutions();
+			scope_timer t0("convolve");
+			t.convolve();
+		}
+		{
+			scope_timer t0("apply gravity");
+			t.apply_grav();
 		}
 	}
 

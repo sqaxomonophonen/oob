@@ -18,7 +18,7 @@ struct scope_timer {
 	}
 	~scope_timer() {
 		uint64_t dt = nanotime_get() - t0;
-		printf("%s: %llu ns\n", timee, dt);
+		//printf("%s: %llu ns\n", timee, dt);
 	}
 };
 
@@ -435,10 +435,10 @@ struct automata {
 			v += dyv;
 		}
 		if(OOB > 0) {
-			printf("%d pixels out of bounds\n", OOB);
+			//printf("%d pixels out of bounds\n", OOB);
 		}
 		if(TOOB > 0) {
-			printf("%d texels out of bounds\n", TOOB);
+			//printf("%d texels out of bounds\n", TOOB);
 		}
 	}
 
@@ -798,7 +798,7 @@ struct automata {
 		}
 		lost_mass += rest_mass;
 
-		printf("total mass: %f\trest mass: %f\ttotal lost mass %f\n", total_mass, rest_mass, lost_mass);
+		//printf("total mass: %f\trest mass: %f\ttotal lost mass %f\n", total_mass, rest_mass, lost_mass);
 
 		flipd();
 		time++;

@@ -1,10 +1,12 @@
-#include <mach/mach_time.h>
+//#include <mach/mach_time.h>
 #include "nanotime.h"
 unsigned int mt_numer;
 unsigned int mt_denom;
 bool nanotime_initialized = false;
 
 uint64_t nanotime_get() {
+	return 0;
+	#if 0
 	if(!nanotime_initialized) {
 		/* XXX MACH SPECIFIC */
 		mach_timebase_info_data_t info;
@@ -14,4 +16,5 @@ uint64_t nanotime_get() {
 		nanotime_initialized = true;
 	}
 	return ((mach_absolute_time() * mt_numer) / mt_denom);
+	#endif
 }

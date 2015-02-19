@@ -1,12 +1,11 @@
 # Makefile
 
 CC = clang++
-CCFLAGS = -m64 -O3 -msse2 -ffast-math -Wall -I/Library/Frameworks/SDL.framework/Headers -I${HOME}/usr/include
-#LINK = -framework Cocoa -framework SDL -L${HOME}/usr/lib -lfftw3f
-LINK = -framework Cocoa -framework SDL -L${HOME}/usr/lib -lfftw3f
+CCFLAGS = -m64 -O3 -msse2 -ffast-math -Wall $(shell pkg-config --cflags sdl)
+LINK = $(shell pkg-config --libs sdl) -lfftw3f
 O=.o
 OWNOBJS = main.o nanotime.o
-ALLOBJS = $(OWNOBJS) SDLMain.o
+ALLOBJS = $(OWNOBJS)
 DEPS = nanotime.h
 
 
@@ -14,9 +13,6 @@ all: main
 
 %.o: %.cc $(DEPS)
 	$(CC) -c -o $@ $< $(CCFLAGS)
-
-SDLMain.o: SDLMain.m
-	$(CC) $(CCFLAGS) -c SDLMain.m
 
 main: $(ALLOBJS) Makefile
 	$(CC) $(CCFLAGS) -o main \

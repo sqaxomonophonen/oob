@@ -811,10 +811,10 @@ struct automata {
 			int m1 = cells[i].d[d].mass * 500.0f;
 			int m2 = cells[i].d[d].mass * 150.0f;
 			int m3 = (cells[i].d[d].mass * cells[i].d[d].mass + cells[i].d[d].XXX_residual) * 100.0f;
-			bitmap[i*4+0] = 0;
-			bitmap[i*4+1] = m1 > 255 ? 255 : m1;
-			bitmap[i*4+2] = m2 > 255 ? 255 : m2;
-			bitmap[i*4+3] = cells[i].d[d].mass != 0 ? (m3 < 30 ? 30 : (m3 > 255 ? 255 : m3)) : 0;
+			bitmap[i*4+3] = 0;
+			bitmap[i*4+2] = m1 > 255 ? 255 : m1;
+			bitmap[i*4+1] = m2 > 255 ? 255 : m2;
+			bitmap[i*4+0] = cells[i].d[d].mass != 0 ? (m3 < 30 ? 30 : (m3 > 255 ? 255 : m3)) : 0;
 			//pixels[i*screen->format->BytesPerPixel+3] = m3 > 70 ? 70 : m3;
 			//pixels[i*screen->format->BytesPerPixel+3] = cells[i].d[d].mass != 0 ? 30 : 0;
 		}

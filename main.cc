@@ -17,7 +17,7 @@ struct scope_timer {
 		t0 = nanotime_get();
 	}
 	~scope_timer() {
-		uint64_t dt = nanotime_get() - t0;
+		//uint64_t dt = nanotime_get() - t0;
 		//printf("%s: %llu ns\n", timee, dt);
 	}
 };
@@ -261,6 +261,7 @@ struct automata {
 	int time;
 	struct gravity_convolution gc;
 	std::vector<struct solid*> solids;
+	uint8_t* bitmap;
 
 	const float MASS_EPSILON() const {
 		// discard masses below this epsilon value
@@ -272,6 +273,7 @@ struct automata {
 		lost_mass = 0.0f;
 		empty.clear();
 		time = 0;
+		bitmap = (uint8_t*) malloc((1<<exp) * (1<<exp) * 4);
 
 	}
 
@@ -804,20 +806,18 @@ struct automata {
 		time++;
 	}
 
-	void paint(SDL_Surface* screen) {
-		SDL_LockSurface(screen);
-		char* pixels = (char*) screen->pixels;
+	void paint() {
 		for(int i = 0; i < area(); i++) {
 			int m1 = cells[i].d[d].mass * 500.0f;
 			int m2 = cells[i].d[d].mass * 150.0f;
 			int m3 = (cells[i].d[d].mass * cells[i].d[d].mass + cells[i].d[d].XXX_residual) * 100.0f;
-			pixels[i*screen->format->BytesPerPixel+1] = m1 > 255 ? 255 : m1;
-			pixels[i*screen->format->BytesPerPixel+2] = m2 > 255 ? 255 : m2;
-			pixels[i*screen->format->BytesPerPixel+3] = cells[i].d[d].mass != 0 ? (m3 < 30 ? 30 : (m3 > 255 ? 255 : m3)) : 0;
+			bitmap[i*4+0] = 0;
+			bitmap[i*4+1] = m1 > 255 ? 255 : m1;
+			bitmap[i*4+2] = m2 > 255 ? 255 : m2;
+			bitmap[i*4+3] = cells[i].d[d].mass != 0 ? (m3 < 30 ? 30 : (m3 > 255 ? 255 : m3)) : 0;
 			//pixels[i*screen->format->BytesPerPixel+3] = m3 > 70 ? 70 : m3;
 			//pixels[i*screen->format->BytesPerPixel+3] = cells[i].d[d].mass != 0 ? 30 : 0;
 		}
-		SDL_UnlockSurface(screen);
 	}
 };
 
@@ -825,9 +825,16 @@ int main(int argc, char** argv) {
 	SDL_Init(SDL_INIT_VIDEO);
 
 	int exp = 9;
-	int flags = 0;
-	SDL_Surface* screen = SDL_SetVideoMode(1<<exp, 1<<exp, 32, flags);
-	SDL_WM_SetCaption("OUT OF BEER", NULL);
+
+	int bitmask = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+	SDL_Window* window = SDL_CreateWindow(
+		"OUT OF BEER",
+		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+		192, 108,
+		bitmask);
+
+	SDL_Renderer* r = SDL_CreateRenderer(window, -1, 0);
+	SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 1<<exp, 1<<exp);
 
 	automata a(exp);
 
@@ -875,8 +882,13 @@ int main(int argc, char** argv) {
 			a.add_mass(mx+1, my+1, m);
 		}
 		if(running) a.step();
-		a.paint(screen);
-		SDL_Flip(screen);
+		a.paint();
+
+		SDL_UpdateTexture(t, NULL, a.bitmap, (1<<exp) * 4);
+		SDL_SetRenderDrawColor(r, 255, 100, 0, 255);
+		SDL_RenderClear(r);
+		SDL_RenderCopy(r, t, NULL, NULL);
+		SDL_RenderPresent(r);
 	}
 
 	return 0;

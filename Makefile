@@ -1,8 +1,9 @@
 # Makefile
 
 CC = clang++
-CCFLAGS = -m64 -O3 -msse2 -ffast-math -Wall $(shell pkg-config --cflags sdl)
-LINK = $(shell pkg-config --libs sdl) -lfftw3f
+PKGS=fftw3f sdl2
+CCFLAGS = -O3 -msse2 -ffast-math -Wall $(shell pkg-config --cflags $(PKGS))
+LINK = $(shell pkg-config --libs $(PKGS))
 O=.o
 OWNOBJS = main.o nanotime.o
 ALLOBJS = $(OWNOBJS)

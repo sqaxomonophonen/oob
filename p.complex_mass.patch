@@ -1,0 +1,147 @@
+diff --git a/main.cc b/main.cc
+index 3065de5..bcb4cee 100644
+--- a/main.cc
++++ b/main.cc
+@@ -4,6 +4,7 @@
+ #include <fftw3.h>
+ #include "nanotime.h"
+ #include <vector>
++#include <assert.h>
+ 
+ #define PI (3.14159265359f)
+ #define HALFPI (PI*0.5f)
+@@ -245,8 +246,8 @@ struct gravity_convolution {
+ 		int nn = n*n;
+ 		for(int i = 0; i < nn; i++) {
+ 			float new_re = data[i][0] * kernel[i][0] - data[i][1] * kernel[i][1];
+-			data[i][1] = data[i][1] * kernel[i][0] + data[i][0] * kernel[i][1];
+-			data[i][0] = new_re;
++			data[i][1]   = data[i][1] * kernel[i][0] + data[i][0] * kernel[i][1];
++			data[i][0]   = new_re;
+ 		}
+ 		fftwf_execute(data_backward_plan);
+ 	}
+@@ -311,23 +312,44 @@ struct automata {
+ 				float dx = length()/2-x;
+ 				float dy = length()/2-y;
+ 				float d = dx * dx + dy * dy;
+-				if(d < 34000 && d > 30000) {
+-					at(x,y).mass = 0.47;
+-					at(x,y).vx = dy * 0.0007f + dx * 0.001f;
+-					at(x,y).vy = -dx * 0.0007f + dy * 0.001f;
++				#if 0
++				if (d < 54000 && d > 5000) {
++					//at(x,y).mass = 0.47/2;
++					//at(x,y).vx = dy * 0.0007f + dx * 0.001f;
++					//at(x,y).vy = -dx * 0.0007f + dy * 0.001f;
++
++					//const float sx = 1.0007f;
++					//const float sy = 0.001;
++					//at(x,y).vx = dy * sx + dx * sy;
++					//at(x,y).vy = -dx * sx + dy * sy;
++
++					at(x,y).mass = 0.09f;
+ 				}
+-				if(d <= 1) {
+-					//at(x,y).mass = 2.1f;
++				if (d <= 1000) {
++					at(x,y).mass = 0.1f;
+ 				}
++				#endif
++				if (d < 74000) {
++					at(x,y).mass = 0.035f;
++				}
++				//at(x,y).mass = 0.05f;
++
++				const float s = 1.1e-3f;
++				const float t = -1.4e-4f;
++				//const float s = 0;
++				//const float t = 0;
++				at(x,y).vx = dy * s + dx * t;
++				at(x,y).vy = -dx * s + dy * t;
+ 			}
+ 		}
+ 		// XXX TODO clean up!
++		#if 0
+ 		struct solid* solid = new struct solid(280, 120);
+ 		solid->position = vec2(256, 256);
+ 		solid->rotation = 0.0f;
+ 		solid->init_debug();
+ 		solids.push_back(solid);
+-		 
++		#endif
+ 	}
+ 
+ 	struct celld& atc(int x, int y) const {
+@@ -353,6 +375,7 @@ struct automata {
+ 	}
+ 
+ 	void rasterize_solid_trapezoid(struct solid& s, float y1f, float y2f, float x1f, float x2f, float x3f, float x4f, const struct vec2& t0, const struct vec2& dt) {
++		assert(!"BOOM");
+ 		// y
+ 		int y1 = y1f;
+ 		int y2 = y2f;
+@@ -658,8 +681,9 @@ struct automata {
+ 						at((x<<1)+1,(y<<1)).mass +
+ 						at((x<<1),(y<<1)+1).mass +
+ 						at((x<<1)+1,(y<<1)+1).mass;
+-					// vv complex mass! :-)
+-					//gc.data_at(x,y)[1] = gc.data_at(x,y)[0] * 0.05f;
++					const float complex_mass = 0.04f;
++					//const float complex_mass = 0.00f;
++					gc.data_at(x,y)[1] = gc.data_at(x,y)[0] * complex_mass;
+ 				}
+ 			}
+ 
+@@ -824,17 +848,18 @@ struct automata {
+ int main(int argc, char** argv) {
+ 	SDL_Init(SDL_INIT_VIDEO);
+ 
+-	int exp = 9;
++	const int exp = 9;
++	const int size = 1<<exp;
+ 
+-	int bitmask = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
++	int bitmask = SDL_WINDOW_OPENGL;
+ 	SDL_Window* window = SDL_CreateWindow(
+ 		"OUT OF BEER",
+ 		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
+-		192, 108,
++		size*2, size*2,
+ 		bitmask);
+ 
+ 	SDL_Renderer* r = SDL_CreateRenderer(window, -1, 0);
+-	SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 1<<exp, 1<<exp);
++	SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, size, size);
+ 
+ 	automata a(exp);
+ 
+@@ -870,16 +895,18 @@ int main(int argc, char** argv) {
+ 			}
+ 		}
+ 		if(paint) {
+-			float m = 4.0f;
+-			a.add_mass(mx-1, my-1, m);
+-			a.add_mass(mx, my-1, m);
+-			a.add_mass(mx+1, my-1, m);
+-			a.add_mass(mx-1, my, m);
+-			a.add_mass(mx, my, m);
+-			a.add_mass(mx+1, my, m);
+-			a.add_mass(mx-1, my+1, m);
+-			a.add_mass(mx, my+1, m);
+-			a.add_mass(mx+1, my+1, m);
++			float m = 0.4f;
++			int mmx = mx/2;
++			int mmy = my/2;
++			a.add_mass(mmx-1, mmy-1, m);
++			a.add_mass(mmx, mmy-1, m);
++			a.add_mass(mmx+1, mmy-1, m);
++			a.add_mass(mmx-1, mmy, m);
++			a.add_mass(mmx, mmy, m);
++			a.add_mass(mmx+1, mmy, m);
++			a.add_mass(mmx-1, mmy+1, m);
++			a.add_mass(mmx, mmy+1, m);
++			a.add_mass(mmx+1, mmy+1, m);
+ 		}
+ 		if(running) a.step();
+ 		a.paint();

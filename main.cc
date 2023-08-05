@@ -4,6 +4,9 @@
 #include <fftw3.h>
 #include "nanotime.h"
 #include <vector>
+#include <assert.h>
+
+#include "video_out.h"
 
 #define PI (3.14159265359f)
 #define HALFPI (PI*0.5f)
@@ -92,87 +95,6 @@ struct celld {
 	struct cell d[2];
 };
 
-struct solid {
-	int width;
-	int height;
-	struct solid_cell* cells;
-
-	float XXX_multiplier;
-
-	struct vec2 position;
-	float rotation;
-
-	struct vec2 linear_velocity;
-	float angular_velocity;
-	float mass;
-	struct vec2 force;
-	struct vec2 center_of_mass;
-	float torque;
-
-	solid(int width, int height) : width(width), height(height) {
-		cells = (struct solid_cell*) malloc(sizeof(struct solid_cell) * width * height);
-		XXX_multiplier = 1.0f;
-	}
-
-	~solid() {
-		free(cells);
-	}
-
-	void init_debug() {
-		int r2 = width > height ? height*height/4 : width*width/4;
-		for(int y = 0; y < height; y++) {
-			for(int x = 0; x < width; x++) {
-				int border = 5;
-				float m = (x < border || y < border || x > (width-border) || y > (height-border)) ? 5.2f : 0.0f;
-				int dx = x-width/2;
-				int dy = y-height/2;
-				if((dx*dx+dy*dy) < r2) m = 3.1f;
-				at(x,y).mass = m;
-			}
-		}
-	}
-
-	struct solid_cell& at(int x, int y) const {
-		return cells[x + y * width];
-	}
-
-	void set(struct vec2& p, float r) {
-		position = p;
-		rotation = r;
-	}
-
-	void cell_update() { // XXX what if the solid is split into several? (flood fill)
-		mass = 0.0f;
-		center_of_mass = vec2();
-		for(int y = 0; y < height; y++) {
-			for(int x = 0; x < width; x++) {
-				struct solid_cell& c = cells[x + y * width];
-				mass += c.mass;
-				struct vec2 p(x,y);
-				p *= mass;
-				center_of_mass += p;
-			}
-		}
-		center_of_mass *= (1.0f / mass);
-	}
-
-	void step() {
-		vec2 fm = force / mass;
-		linear_velocity += fm;
-		force = vec2(0,0);
-		angular_velocity += torque / mass;
-		torque = 0.0f;
-		position += linear_velocity;
-		rotation += angular_velocity;
-	}
-
-	void apply_force(struct vec2& applied_force, struct vec2& to_point) {
-		force += applied_force;
-		torque += (to_point - center_of_mass).cross(force); // XXX m_sweep?
-	}
-};
-
-
 struct gravity_convolution {
 	fftwf_complex* data;
 	fftwf_complex* kernel;
@@ -245,8 +167,8 @@ struct gravity_convolution {
 		int nn = n*n;
 		for(int i = 0; i < nn; i++) {
 			float new_re = data[i][0] * kernel[i][0] - data[i][1] * kernel[i][1];
-			data[i][1] = data[i][1] * kernel[i][0] + data[i][0] * kernel[i][1];
-			data[i][0] = new_re;
+			data[i][1]   = data[i][1] * kernel[i][0] + data[i][0] * kernel[i][1];
+			data[i][0]   = new_re;
 		}
 		fftwf_execute(data_backward_plan);
 	}
@@ -311,23 +233,83 @@ struct automata {
 				float dx = length()/2-x;
 				float dy = length()/2-y;
 				float d = dx * dx + dy * dy;
-				if(d < 34000 && d > 30000) {
-					at(x,y).mass = 0.47;
-					at(x,y).vx = dy * 0.0007f + dx * 0.001f;
-					at(x,y).vy = -dx * 0.0007f + dy * 0.001f;
+				#if 0
+				if (d < 54000 && d > 5000) {
+					//at(x,y).mass = 0.47/2;
+					//at(x,y).vx = dy * 0.0007f + dx * 0.001f;
+					//at(x,y).vy = -dx * 0.0007f + dy * 0.001f;
+
+					//const float sx = 1.0007f;
+					//const float sy = 0.001;
+					//at(x,y).vx = dy * sx + dx * sy;
+					//at(x,y).vy = -dx * sx + dy * sy;
+
+					at(x,y).mass = 0.09f;
 				}
-				if(d <= 1) {
-					//at(x,y).mass = 2.1f;
+				if (d <= 1000) {
+					at(x,y).mass = 0.1f;
 				}
+				#endif
+				//if (1000 < d && d < 74000) {
+
+				/*
+				float sd = sin(d*0.0006);
+				if (d < 60000 && sd > 0) {
+					at(x,y).mass = 0.255f * sd;
+				}
+				*/
+
+				/*
+
+				const float ss = 0.06f;
+				const float mx = dx * ss;
+				const float my = dy * ss;
+				const float dd = fabsf(mx*tanf(sqrtf(mx*mx + my*my)) - my);
+				if (dd < 2.0f) {
+					at(x,y).mass = dd * 0.6f;
+				}
+
+
+				//at(x,y).mass = 0.05f;
+
+				const float s = 2.1e-3f;
+				const float t = -1.4e-3f;
+				//const float s = 0;
+				//const float t = 0;
+				at(x,y).vx = dy * s + dx * t;
+				at(x,y).vy = -dx * s + dy * t;
+				*/
+
+				/*
+				if (d < 2000) {
+					at(x,y).mass = 1.2f;
+					const float f = 0.01f;
+					at(x,y).vx = -dx * f;
+					at(x,y).vy = -dy * f;
+				} else if (40000 < d && d < 70000) {
+					at(x,y).mass = 0.02f;
+					const float f = 0.02f;
+					at(x,y).vx = dx * f;
+					at(x,y).vy = dy * f;
+				}
+				*/
+
+				if (d < 1000) at(x,y).mass = 0.8f;
+				if (20000 < d && d < 30000) at(x,y).mass = 0.1f;
+
+
+
+
 			}
 		}
 		// XXX TODO clean up!
+		#if 0
 		struct solid* solid = new struct solid(280, 120);
 		solid->position = vec2(256, 256);
 		solid->rotation = 0.0f;
 		solid->init_debug();
 		solids.push_back(solid);
-		 
+		#endif
 	}
 
 	struct celld& atc(int x, int y) const {
@@ -352,282 +334,6 @@ struct automata {
 		}
 	}
 
-	void rasterize_solid_trapezoid(struct solid& s, float y1f, float y2f, float x1f, float x2f, float x3f, float x4f, const struct vec2& t0, const struct vec2& dt) {
-		// y
-		int y1 = y1f;
-		int y2 = y2f;
-		int dy = y2 - y1;
-
-		// left
-		int x_l = x1f;
-		int dx_l = abs(((int)x3f) - x_l);
-		int sx_l = x3f>x1f ? 1 : -1;
-		int err_l = dx_l - dy;
-
-		// right
-		int x_r = x2f;
-		int dx_r = abs(((int)x4f) - x_r);
-		int sx_r = x4f>x2f ? 1 : -1;
-		int err_r = dx_r - dy;
-
-
-		const float M = 65536.0f;
-		float u0 = t0.u;
-		float v0 = t0.v;
-		float du = dt.u;
-		float dv = dt.v;
-		int u = u0 * M;
-		int v = v0 * M;
-		int dxu = du * M;
-		int dxv = dv * M;
-		int dyu = -dv * M;
-		int dyv = du * M;
-		int tsxu_l = x3f>x1f ? dxu : -dxu;
-		int tsxv_l = x3f>x1f ? dxv : -dxv;
-
-		int OOB = 0;
-		int TOOB = 0;
-		for(int y = y1; y < y2; y++) {
-			int save_u = u;
-			int save_v = v;
-			for(int x = x_l; x < x_r; x++) {
-				if(x < 0 || y < 0 || x >= length() || y >= length()) {
-					OOB++; // XXX convert to exit(1) at some point, then remove completely when it's safe
-				} else {
-					int nu = u >> 16;
-					int nv = v >> 16;
-					if(nu < 0 || nv < 0 || nu >= s.width || nv >= s.height) {
-						TOOB++; // XXX convert to exit(1) at some point, then remove completely when it's safe
-					} else {
-						//at(x,y).mass = s.at(nu, nv).mass;
-						at(x,y).mass += s.at(nu, nv).mass * s.XXX_multiplier; // XXX
-						atz(x,y).XXX_residual = s.at(nu, nv).mass;
-					}
-				}
-				u += dxu;
-				v += dxv;
-			}
-			u = save_u;
-			v = save_v;
-			while(1) {
-				int e2 = err_l << 1;
-				if(e2 > -dy) {
-					err_l -= dy;
-					x_l += sx_l;
-					u += tsxu_l;
-					v += tsxv_l;
-				}
-				if(e2 < dx_l) {
-					err_l += dx_l;
-					break;
-				}
-			}
-			while(1) {
-				int e2 = err_r << 1;
-				if(e2 > -dy) {
-					err_r -= dy;
-					x_r += sx_r;
-				}
-				if(e2 < dx_r) {
-					err_r += dx_r;
-					break;
-				}
-			}
-			u += dyu;
-			v += dyv;
-		}
-		if(OOB > 0) {
-			//printf("%d pixels out of bounds\n", OOB);
-		}
-		if(TOOB > 0) {
-			//printf("%d texels out of bounds\n", TOOB);
-		}
-	}
-
-	void rasterize_solid_trapezoid_clip(struct solid& s, float y1f, float y2f, float x1f, float x2f, float x3f, float x4f, struct vec2 t0, struct vec2 dt) {
-		// clip y
-		if(y2f <= y1f) return; // XXX check probably not required
-		if(y2f < 1.0f) return;
-		if(y1f >= length()) return;
-		if(y1f < 0.0f) {
-			float i = -y1f / (y2f - y1f); // y1f + (y2f - y1f) * i = 0
-			float old_x1f = x1f;
-			x1f = lerp<float>(x1f, x3f, i);
-			x2f = lerp<float>(x2f, x4f, i);
-			t0 += dt * (x1f - old_x1f);
-			t0 += dt.normal() * -y1f;
-			y1f = 0.0f;
-		}
-
-		if(y2f > length()) {
-			float i = (length() - y1f) / (y2f - y1f); // y1f + (y2f - y1f) * i = length()
-			x3f = lerp<float>(x1f, x3f, i);
-			x4f = lerp<float>(x2f, x4f, i);
-			y2f = length();
-		}
-
-		// clip left
-		if(x1f >= length() && x3f >= length()) {
-			return;
-		} else if(x1f < 0.0f && x3f < 0.0f) {
-			t0 += dt * -x1f;
-			x1f = 0.0f;
-			x3f = 0.0f;
-		} else if(x1f < 0.0f || x3f < 0.0f) {
-			// partly outside on the left; clip recursively
-			float i = -x1f / (x3f-x1f); // x1f + (x3f-x1f) * i = 0
-			float mx = lerp<float>(x2f, x4f, i);
-			float my = lerp<float>(y1f, y2f, i);
-			if(x1f < 0.0f) {
-				t0 += dt * -x1f;
-				rasterize_solid_trapezoid_clip(s, y1f, my, 0.0f, x2f, 0.0f, mx, t0, dt);
-				t0 += dt.normal() * (my - y1f);
-				rasterize_solid_trapezoid_clip(s, my, y2f, 0.0f, mx, x3f, x4f, t0, dt);
-			} else {
-				rasterize_solid_trapezoid_clip(s, y1f, my, x1f, x2f, 0.0f, mx, t0, dt);
-				t0 += dt * -x1f + dt.normal() * (my - y1f);
-				rasterize_solid_trapezoid_clip(s, my, y2f, 0.0f, mx, 0.0f, x4f, t0, dt);
-			}
-			return;
-		}
-
-		// clip right
-		if(x2f < 1.0f && x4f < 1.0f) {
-			return;
-		} else if(x2f > length() && x4f > length()) {
-			x2f = length();
-			x4f = length();
-		} else if(x2f > length() || x4f > length()) {
-			// partly outside on the right; clip recursively
-			float i = (length() - x2f) / (x4f-x2f); // x2f + (x4f-x2f) * i = length()
-			float mx = lerp<float>(x1f, x3f, i);
-			float my = lerp<float>(y1f, y2f, i);
-			if(x2f > length()) {
-				rasterize_solid_trapezoid_clip(s, y1f, my, x1f, length(), mx, length(), t0, dt);
-				t0 += dt * (mx - x1f) + dt.normal() * (my - y1f);
-				rasterize_solid_trapezoid_clip(s, my, y2f, mx, length(), x3f, x4f, t0, dt);
-			} else {
-				rasterize_solid_trapezoid_clip(s, y1f, my, x1f, x2f, mx, length(), t0, dt);
-				t0 += dt * (mx - x1f) + dt.normal() * (my - y1f);
-				rasterize_solid_trapezoid_clip(s, my, y2f, mx, length(), x3f, length(), t0, dt);
-			}
-			return;
-			
-		}
-
-		rasterize_solid_trapezoid(s, y1f, y2f, x1f, x2f, x3f, x4f, t0, dt);
-	}
-
-	void rasterize_solid(struct solid& s) {
-		scope_timer tt("rasterize solid");
-
-		// rotation vector
-		vec2 r(cosf(s.rotation), sinf(s.rotation));
-
-		// origin
-		vec2 p0 = s.position;
-
-		// width corner displacement
-		vec2 dw = r * s.width;
-
-		// width corner position
-		vec2 pw = p0 + dw;
-
-		// height corner displacement
-		vec2 dh = r.normal() * s.height;
-
-		// height corner position
-		vec2 ph = p0 + dh;
-
-		// opposite corner position
-		vec2 p1 = p0 + dw + dh;
-
-		// texture corners
-		struct vec2 t0 = vec2(0.5f, 0.5f);
-		struct vec2 tw = vec2(s.width-1, 0.5f);
-		struct vec2 th = vec2(0.5f, s.height-1);
-		struct vec2 t1 = tw + th;
-
-		// texture gradient
-		struct vec2 dt = vec2(r.u, -r.v);
-
-		// warp rotation into [0;2pi[ and fint quadrant
-		float a = s.rotation;
-		while(a < 0.0f) a += PI2;
-		while(a >= PI2) a -= PI2;
-		int q = (a / HALFPI);
-		switch(q) {
-		case 0:
-			if(dw.v < dh.v) {
-				float i = dw.v / dh.v;
-				float m0 = lerp<float>(p0.u, ph.u, i);
-				float m1 = lerp<float>(pw.u, p1.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, p0.v, pw.v, p0.u, p0.u, m0, pw.u, t0, dt);
-				rasterize_solid_trapezoid_clip(s, pw.v, ph.v, m0, pw.u, ph.u, m1, th*i, dt);
-				rasterize_solid_trapezoid_clip(s, ph.v, p1.v, ph.u, m1, p1.u, p1.u, th, dt);
-			} else {
-				float i = dh.v / dw.v;
-				float m0 = lerp<float>(p0.u, pw.u, i);
-				float m1 = lerp<float>(ph.u, p1.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, p0.v, ph.v, p0.u, p0.u, ph.u, m0, t0, dt);
-				rasterize_solid_trapezoid_clip(s, ph.v, pw.v, ph.u, m0, m1, pw.u, th, dt);
-				rasterize_solid_trapezoid_clip(s, pw.v, p1.v, m1, pw.u, p1.u, p1.u, tw*(1-i)+th, dt);
-			}
-			break;
-		case 1:
-			if(p0.v < p1.v) {
-				float i = (p0.v-ph.v)/(p1.v-ph.v);
-				float m0 = lerp<float>(ph.u, p1.u, i);
-				float m1 = lerp<float>(p0.u, pw.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, ph.v, p0.v, ph.u, ph.u, m0, p0.u, th, dt);
-				rasterize_solid_trapezoid_clip(s, p0.v, p1.v, m0, p0.u, p1.u, m1, tw*i+th, dt);
-				rasterize_solid_trapezoid_clip(s, p1.v, pw.v, p1.u, m1, pw.u, pw.u, t1, dt);
-			} else {
-				float i = (ph.v-p1.v)/(ph.v-p0.v);
-				float m0 = lerp<float>(ph.u, p0.u, i);
-				float m1 = lerp<float>(p1.u, pw.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, ph.v, p1.v, ph.u, ph.u, p1.u, m0, th, dt);
-				rasterize_solid_trapezoid_clip(s, p1.v, p0.v, p1.u, m0, m1, p0.u, t1, dt);
-				rasterize_solid_trapezoid_clip(s, p0.v, pw.v, m1, p0.u, pw.u, pw.u, tw + th*i, dt);
-			}
-			break;
-		case 2:
-			if(dh.v < dw.v) {
-				float i = (ph.v-p1.v)/(pw.v-p1.v);
-				float m0 = lerp<float>(p1.u, pw.u, i);
-				float m1 = lerp<float>(ph.u, p0.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, p1.v, ph.v, p1.u, p1.u, m0, ph.u, t1, dt);
-				rasterize_solid_trapezoid_clip(s, ph.v, pw.v, m0, ph.u, pw.u, m1, tw+th*(1-i), dt);
-				rasterize_solid_trapezoid_clip(s, pw.v, p0.v, pw.u, m1, p0.u, p0.u, tw, dt);
-			} else {
-				float i = (pw.v-p1.v)/(ph.v-p1.v);
-				float m0 = lerp<float>(p1.u, ph.u, i);
-				float m1 = lerp<float>(pw.u, p0.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, p1.v, pw.v, p1.u, p1.u, pw.u, m0, t1, dt);
-				rasterize_solid_trapezoid_clip(s, pw.v, ph.v, pw.u, m0, m1, ph.u, tw, dt);
-				rasterize_solid_trapezoid_clip(s, ph.v, p0.v, m1, ph.u, p0.u, p0.u, tw*i, dt);
-			}
-			break;
-		case 3:
-			if(p1.v < p0.v) {
-				float i = (p1.v-pw.v)/(p0.v-pw.v);
-				float m0 = lerp<float>(pw.u, p0.u, i);
-				float m1 = lerp<float>(p1.u, ph.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, pw.v, p1.v, pw.u, pw.u, m0, p1.u, tw, dt);
-				rasterize_solid_trapezoid_clip(s, p1.v, p0.v, m0, p1.u, p0.u, m1, tw*(1-i), dt);
-				rasterize_solid_trapezoid_clip(s, p0.v, ph.v, p0.u, m1, ph.u, ph.u, t0, dt);
-			} else {
-				float i = (pw.v-p0.v)/(pw.v-p1.v);
-				float m0 = lerp<float>(pw.u, p1.u, i);
-				float m1 = lerp<float>(p0.u, ph.u, 1.0f - i);
-				rasterize_solid_trapezoid_clip(s, pw.v, p0.v, pw.u, pw.u, p0.u, m0, tw, dt);
-				rasterize_solid_trapezoid_clip(s, p0.v, p1.v, p0.u, m0, m1, p1.u, t0, dt);
-				rasterize_solid_trapezoid_clip(s, p1.v, ph.v, m1, p1.u, ph.u, ph.u, th*(1-i), dt);
-			}
-			break;
-		}
-	}
-
 	void step() {
 		scope_timer tt("step");
 
@@ -637,13 +343,6 @@ struct automata {
 				atz(x,y).clear();
 				//at(x,y).clear(); // XXX
 			}
-		}
-
-		// rasterize and step solids
-		for(std::vector<struct solid*>::iterator s = solids.begin(); s != solids.end(); s++) {
-			(*s)->XXX_multiplier = 1.0f;
-			rasterize_solid(**s);
-			//s->step();
 		}
 
 		// do gravity once in a while
@@ -658,8 +357,9 @@ struct automata {
 						at((x<<1)+1,(y<<1)).mass +
 						at((x<<1),(y<<1)+1).mass +
 						at((x<<1)+1,(y<<1)+1).mass;
-					// vv complex mass! :-)
-					//gc.data_at(x,y)[1] = gc.data_at(x,y)[0] * 0.05f;
+					//const float complex_mass = 0.1f;
+					const float complex_mass = 0.00f;
+					gc.data_at(x,y)[1] = gc.data_at(x,y)[0] * complex_mass;
 				}
 			}
 
@@ -686,14 +386,6 @@ struct automata {
 					at((x<<1)+1,(y<<1)+1).vy += ay;
 				}
 			}
-		}
-
-		// erase-rasterize and step solids
-		for(std::vector<struct solid*>::iterator s = solids.begin(); s != solids.end(); s++) {
-			(*s)->XXX_multiplier = -1.0f;
-			rasterize_solid(**s);
-			(*s)->rotation += 0.01f;
-			//s->step();
 		}
 
 		// apply pressure (perhaps do linear solve after this...?)
@@ -811,7 +503,7 @@ struct automata {
 			int m1 = cells[i].d[d].mass * 500.0f;
 			int m2 = cells[i].d[d].mass * 150.0f;
 			int m3 = (cells[i].d[d].mass * cells[i].d[d].mass + cells[i].d[d].XXX_residual) * 100.0f;
-			bitmap[i*4+3] = 0;
+			bitmap[i*4+3] = 255;
 			bitmap[i*4+2] = m1 > 255 ? 255 : m1;
 			bitmap[i*4+1] = m2 > 255 ? 255 : m2;
 			bitmap[i*4+0] = cells[i].d[d].mass != 0 ? (m3 < 30 ? 30 : (m3 > 255 ? 255 : m3)) : 0;
@@ -824,23 +516,30 @@ struct automata {
 int main(int argc, char** argv) {
 	SDL_Init(SDL_INIT_VIDEO);
 
-	int exp = 9;
+	const int exp = 9;
+	const int size = 1<<exp;
 
-	int bitmask = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+	int bitmask = SDL_WINDOW_OPENGL;
 	SDL_Window* window = SDL_CreateWindow(
 		"OUT OF BEER",
 		SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-		192, 108,
+		size*2, size*2,
 		bitmask);
 
 	SDL_Renderer* r = SDL_CreateRenderer(window, -1, 0);
-	SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 1<<exp, 1<<exp);
+	SDL_Texture* t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, size, size);
 
 	automata a(exp);
 
 	a.init_debug();
 
 	bool exiting = false;
+
+	//#define VO
+
+	#ifdef VO
+	struct vo* vo = vo_open("out.mkv", size, size, "rgb32");
+	#endif
 
 	int mx = 0;
 	int my = 0;
@@ -870,19 +569,25 @@ int main(int argc, char** argv) {
 			}
 		}
 		if(paint) {
-			float m = 4.0f;
-			a.add_mass(mx-1, my-1, m);
-			a.add_mass(mx, my-1, m);
-			a.add_mass(mx+1, my-1, m);
-			a.add_mass(mx-1, my, m);
-			a.add_mass(mx, my, m);
-			a.add_mass(mx+1, my, m);
-			a.add_mass(mx-1, my+1, m);
-			a.add_mass(mx, my+1, m);
-			a.add_mass(mx+1, my+1, m);
+			float m = 0.4f;
+			int mmx = mx/2;
+			int mmy = my/2;
+			a.add_mass(mmx-1, mmy-1, m);
+			a.add_mass(mmx, mmy-1, m);
+			a.add_mass(mmx+1, mmy-1, m);
+			a.add_mass(mmx-1, mmy, m);
+			a.add_mass(mmx, mmy, m);
+			a.add_mass(mmx+1, mmy, m);
+			a.add_mass(mmx-1, mmy+1, m);
+			a.add_mass(mmx, mmy+1, m);
+			a.add_mass(mmx+1, mmy+1, m);
 		}
 		if(running) a.step();
 		a.paint();
+
+		#ifdef VO
+		vo_frame(vo, a.bitmap);
+		#endif
 
 		SDL_UpdateTexture(t, NULL, a.bitmap, (1<<exp) * 4);
 		SDL_SetRenderDrawColor(r, 255, 100, 0, 255);
@@ -891,6 +596,9 @@ int main(int argc, char** argv) {
 		SDL_RenderPresent(r);
 	}
 
+	#ifdef VO
+	vo_close(vo);
+	#endif
+
 	return 0;
 }
-

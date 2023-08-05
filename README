@@ -1,0 +1,11 @@
+The theme is various fast ways to do large gravity simulations, but the main
+build artifact turned into kind of a "star simulator" (adding pressure
+alongside gravity) that renders videos like these in real-time:
+https://www.youtube.com/watch?v=DqYFIrdAAio
+
+I also played around with the Barnes-Hut algorithm, and a Walter Dehnen "O(n)"
+algorithm (https://arxiv.org/abs/astro-ph/0202512) which I struggled to
+understand :-)
+
+I ended up with a grid-based system, where acceleration from gravity is
+calculated at each cell using convolution, which is optimized with FFTs.

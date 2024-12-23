@@ -2,6 +2,7 @@ The theme is various fast ways to do large gravity simulations, but the main
 build artifact turned into kind of a "star simulator" (adding pressure
 alongside gravity) that renders videos like these in real-time:
 https://www.youtube.com/watch?v=DqYFIrdAAio
+https://mastodon.social/@sqx/113239969000196032
 
 I also played around with the Barnes-Hut algorithm, and a Walter Dehnen "O(n)"
 algorithm (https://arxiv.org/abs/astro-ph/0202512) which I struggled to
